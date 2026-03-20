@@ -6,12 +6,6 @@ app.use(express.json());
 
 const VERIFY_TOKEN = "primia_verify_123";
 
-// Root test
-app.get("/", (req, res) => {
-  res.send("Server is running");
-});
-
-// Meta webhook verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -21,40 +15,31 @@ app.get("/webhook", (req, res) => {
     console.log("✅ Webhook verified");
     return res.status(200).send(challenge);
   } else {
-    console.log("❌ Webhook verification failed");
+    console.log("❌ Verification failed");
     return res.sendStatus(403);
   }
 });
 
-// Incoming WhatsApp messages from Meta
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("📩 Incoming webhook:", JSON.stringify(req.body, null, 2));
+    console.log("Incoming JSON:", JSON.stringify(req.body, null, 2));
 
-    const message =
-      req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-
-    if (!message) {
-      return res.sendStatus(200);
-    }
-
-    const userMessage = message.text?.body;
-
-    if (!userMessage) {
-      return res.sendStatus(200);
-    }
-
+    const message = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const from = message?.from;
+    const text = message?.text?.body;
     const phoneNumberId =
       req.body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
-    const from = message.from;
+    if (!text || !from || !phoneNumberId) {
+      return res.sendStatus(200);
+    }
 
     const sarvamPayload = {
       model: "sarvam-m",
       messages: [
         {
           role: "user",
-          content: userMessage
+          content: text
         }
       ]
     };
@@ -69,7 +54,7 @@ app.post("/webhook", async (req, res) => {
     });
 
     const sarvamData = await sarvamRes.json();
-    console.log("Sarvam response:", sarvamData);
+    console.log("Sarvam Response:", sarvamData);
 
     const sarvamReply =
       sarvamData?.choices?.[0]?.message?.content ||
