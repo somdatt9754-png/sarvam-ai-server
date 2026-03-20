@@ -1,231 +1,212 @@
-import express from "express";
-import fetch from "node-fetch";
+const express = require("express");
+const axios = require("axios");
 
 const app = express();
 app.use(express.json());
 
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "primia_verify_123";
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const SARVAM_API_KEY = process.env.SARVAM_API_KEY;
+/* =========================
+   DIRECT CONFIG
+   यहाँ अपनी values डालो
+========================= */
+const PORT = 3000;
+const VERIFY_TOKEN = "primia_verify_token"; // अपना webhook verify token
+const WHATSAPP_TOKEN = "PASTE_YOUR_META_WHATSAPP_TOKEN_HERE"; // अपना Meta permanent/working token
+const PHONE_NUMBER_ID = "PASTE_YOUR_PHONE_NUMBER_ID_HERE"; // अपना phone number id
 
+/* =========================
+   IN-MEMORY SESSION STORE
+========================= */
 const sessions = new Map();
 
-const CROP_VIDEOS = {
-  karela: [
-    "https://drive.google.com/file/d/1hlQBz3BZxY8dRLcnYTjUFQPWpLtP92F_/view"
-  ],
-  belvargiya: [
-    "https://drive.google.com/file/d/1hlQBz3BZxY8dRLcnYTjUFQPWpLtP92F_/view"
-  ],
-  tomato: [
-    "https://drive.google.com/file/d/1R4PGjIMhvvi3zSZ5r9861Tmc2zsl58wq/view"
-  ],
-  tarbuj: [
-    "https://drive.google.com/file/d/1YDuPmmwpvkKBOAGokd0aPMt51AtAUDHc/view"
-  ],
-  papita: [
-    "https://drive.google.com/file/d/1OsV7eED2LUxMwxVylUBYMKbV_VuQ-gch/view"
-  ],
-  mirch: [
-    "https://drive.google.com/file/d/17ZVFm1L_wjb1vh1cP5JYvTW39dMV6tI3/view",
-    "https://drive.google.com/file/d/1xk6lrDsi9waFtXkhBA1fdVFQ95mxeTQl/view",
-    "https://drive.google.com/file/d/1XqQBNRROZeRuyrqDA5kAhs9SUKCRU1Vw/view",
-    "https://drive.google.com/file/d/1i41L62gbhpUMIQ9aiyjeJeDncUs3rGIP/view",
-    "https://drive.google.com/file/d/1WQdw66tw-YQioeB7NoKHaE9WOzidOLPI/view"
-  ]
-};
+function getSession(phone) {
+  if (!sessions.has(phone)) {
+    sessions.set(phone, {
+      language: "hi",
+      crop: null,
+      waterLiters: null,
+      introSent: false,
+      recommendationSent: false,
+      orderAsked: false,
+      stopFollowup: false,
+      agentSilentUntil: 0,
+      followups: {
+        f1: false,
+        f2: false,
+        f3: false,
+        f4: false,
+        f5: false,
+      },
+      lastUserMessageAt: 0,
+      lastBotMessageAt: 0,
+      createdAt: Date.now(),
+    });
+  }
+  return sessions.get(phone);
+}
 
+/* =========================
+   LOCKED DATA
+========================= */
 const PACKS = [
+  { min: 50, max: 60, text: "100 ml + 100 g + 50 g → ₹620 (50–60 लीटर)" },
+  { min: 100, max: 120, text: "200 ml + 200 g + 100 g → ₹1040 (100–120 लीटर)" },
+  { min: 150, max: 170, text: "300 ml + 300 g + 150 g → ₹1360 (150–170 लीटर)" },
+  { min: 200, max: 220, text: "400 ml + 400 g + 200 g → ₹1620 (200–220 लीटर)" },
+  { min: 300, max: 340, text: "500 ml + 500 g + 300 g → ₹2260 + 100 ml Shooter + 100 g Viron FREE (300–340 लीटर)" },
+  { min: 600, max: 650, text: "1 लीटर + 1 किलो + 600 g → ₹4020 + 200 ml Shooter + 200 g Viron FREE (600–650 लीटर)" }
+];
+
+const CROP_VIDEO_MAP = [
   {
-    min: 50,
-    max: 60,
-    text: "👉 100 ml + 100 g + 50 g pack\n₹620"
+    keys: ["करेला", "खीरा", "ककड़ी", "लौकी", "तोरई", "नेनुआ", "बेलवर्गीय", "cucurbit", "bitter gourd", "bottle gourd", "gourd"],
+    videos: ["https://drive.google.com/file/d/1hlQBz3BZxY8dRLcnYTjUFQPWpLtP92F_/view"]
   },
   {
-    min: 100,
-    max: 120,
-    text: "👉 200 ml + 200 g + 100 g pack\n₹1040"
+    keys: ["टमाटर", "tomato"],
+    videos: ["https://drive.google.com/file/d/1R4PGjIMhvvi3zSZ5r9861Tmc2zsl58wq/view"]
   },
   {
-    min: 150,
-    max: 170,
-    text: "👉 300 ml + 300 g + 150 g pack\n₹1360"
+    keys: ["तरबूज", "watermelon"],
+    videos: ["https://drive.google.com/file/d/1YDuPmmwpvkKBOAGokd0aPMt51AtAUDHc/view"]
   },
   {
-    min: 200,
-    max: 220,
-    text: "👉 400 ml + 400 g + 200 g pack\n₹1620"
+    keys: ["पपीता", "papaya"],
+    videos: ["https://drive.google.com/file/d/1OsV7eED2LUxMwxVylUBYMKbV_VuQ-gch/view"]
   },
   {
-    min: 300,
-    max: 340,
-    text: "👉 500 ml + 500 g + 300 g pack\n₹2260\n+ 100 ml Shooter + 100 g Viron FREE"
-  },
-  {
-    min: 600,
-    max: 650,
-    text: "👉 1 लीटर + 1 किलो + 600 g pack\n₹4020\n+ 200 ml Shooter + 200 g Viron FREE"
+    keys: ["मिर्च", "शिमला मिर्च", "chilli", "chili", "capsicum", "pepper"],
+    videos: [
+      "https://drive.google.com/file/d/17ZVFm1L_wjb1vh1cP5JYvTW39dMV6tI3/view",
+      "https://drive.google.com/file/d/1xk6lrDsi9waFtXkhBA1fdVFQ95mxeTQl/view",
+      "https://drive.google.com/file/d/1XqQBNRROZeRuyrqDA5kAhs9SUKCRU1Vw/view",
+      "https://drive.google.com/file/d/1i41L62gbhpUMIQ9aiyjeJeDncUs3rGIP/view",
+      "https://drive.google.com/file/d/1WQdw66tw-YQioeB7NoKHaE9WOzidOLPI/view"
+    ]
   }
 ];
 
-function normalize(text = "") {
-  return String(text)
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+const DELETE_WORD_TRIGGERS = ["delete", "remove", "stop", "band", "बंद", "डिलीट", "हटाओ", "रोक दो", "नहीं चाहिए"];
+const HUMAN_AGENT_TRIGGERS = ["agent", "call me", "human", "person", "बात कराओ", "कॉल करो", "आदमी से बात", "किसी से बात", "टीम से बात"];
+const ORDER_YES_WORDS = ["हाँ", "हां", "haa", "haan", "yes", "book", "बुक", "ऑर्डर", "order", "कर दो", "करिए", "करो"];
+const PAYMENT_ONLINE_WORDS = ["online", "upi", "gpay", "phonepe", "paytm", "ऑनलाइन", "यूपीआई"];
+const PAYMENT_COD_WORDS = ["cod", "cash", "delivery", "कैश", "डिलीवरी"];
+
+/* =========================
+   HELPERS
+========================= */
+function normalizeText(text = "") {
+  return text.toString().trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function stripThinkBlocks(text = "") {
-  return String(text)
+function stripThinkTags(text = "") {
+  return text
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     .replace(/```[\s\S]*?```/g, "")
     .trim();
 }
 
-function detectLanguage(text = "") {
-  const t = String(text).trim();
-  if (/[\u0900-\u097F]/.test(t)) {
-    return "hi";
+function detectLanguage(text) {
+  const t = normalizeText(text);
+  if (t.includes("मराठी") || t.includes("marathi")) return "mr";
+
+  const marathiHints = ["आहे", "नाही", "काय", "मध्ये", "तुमचं", "पाणी", "पीक", "फवारणी"];
+  for (const word of marathiHints) {
+    if (t.includes(word)) return "mr";
   }
   return "hi";
 }
 
-function getSession(user) {
-  if (!sessions.has(user)) {
-    sessions.set(user, {
-      crop: null,
-      waterLiters: null,
-      language: "hi",
-      lastBotReplyAt: 0,
-      lastUserAt: 0,
-      askedIntro: false
-    });
-  }
-  return sessions.get(user);
+function containsAny(text, words) {
+  const t = normalizeText(text);
+  return words.some(w => t.includes(normalizeText(w)));
 }
 
-function resetSessionIfNeeded(session) {
-  return session;
+function isLikelyGreeting(text) {
+  const t = normalizeText(text);
+  const greetings = ["hi", "hello", "helo", "hii", "namaste", "नमस्ते", "राम राम", "रामराम", "जय श्री राम", "hy"];
+  return greetings.includes(t) || greetings.some(g => t === g);
 }
 
-function detectCrop(text = "") {
-  const t = normalize(text);
-
-  if (t.includes("टमाटर") || t.includes("tamatar") || t.includes("tomato")) {
-    return "tomato";
-  }
-
-  if (
-    t.includes("मिर्च") ||
-    t.includes("mirch") ||
-    t.includes("shimla mirch") ||
-    t.includes("शिमला मिर्च") ||
-    t.includes("chilli") ||
-    t.includes("chili") ||
-    t.includes("capsicum")
-  ) {
-    return "mirch";
-  }
-
-  if (t.includes("तरबूज") || t.includes("tarbuj") || t.includes("watermelon")) {
-    return "tarbuj";
-  }
-
-  if (t.includes("पपीता") || t.includes("papita") || t.includes("papaya")) {
-    return "papita";
-  }
-
-  if (t.includes("करेला") || t.includes("karela") || t.includes("bitter gourd")) {
-    return "karela";
-  }
-
-  if (
-    t.includes("बेलवर्गीय") ||
-    t.includes("belvargiya") ||
-    t.includes("बेल वाली")
-  ) {
-    return "belvargiya";
-  }
-
-  return null;
+function extractWaterLiters(text) {
+  const t = text.toString();
+  const regex = /(\d{1,4})(?:\s*)(?:लीटर|liter|litre|ltr|l|पानी)?/i;
+  const match = t.match(regex);
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  if (isNaN(num) || num <= 0 || num > 5000) return null;
+  return num;
 }
 
-function extractWaterLiters(text = "", session = null) {
-  const t = normalize(text);
+function detectCrop(text) {
+  const raw = text.toString().trim();
+  const t = normalizeText(raw);
 
-  let match = t.match(/(\d+(?:\.\d+)?)\s*(लीटर|liter|litre|ltr|l)\b/i);
-  if (match) return Number(match[1]);
+  const cropMap = [
+    { keys: ["टमाटर", "tomato"], value: "टमाटर" },
+    { keys: ["मिर्च", "हरी मिर्च", "लाल मिर्च", "chilli", "chili"], value: "मिर्च" },
+    { keys: ["शिमला मिर्च", "capsicum"], value: "शिमला मिर्च" },
+    { keys: ["पपीता", "papaya"], value: "पपीता" },
+    { keys: ["तरबूज", "watermelon"], value: "तरबूज" },
+    { keys: ["करेला", "bitter gourd"], value: "करेला" },
+    { keys: ["खीरा", "cucumber"], value: "खीरा" },
+    { keys: ["ककड़ी"], value: "ककड़ी" },
+    { keys: ["लौकी", "bottle gourd"], value: "लौकी" },
+    { keys: ["तोरई", "ridge gourd"], value: "तोरई" },
+    { keys: ["नेनुआ", "sponge gourd"], value: "नेनुआ" }
+  ];
 
-  match = t.match(/^(\d+(?:\.\d+)?)$/);
-  if (match) {
-    const num = Number(match[1]);
-    if (num > 0 && num <= 5000) return num;
-  }
-
-  match = t.match(/(\d+(?:\.\d+)?)/);
-  if (match && /(पानी|लीटर|liter|litre|ltr|स्प्रे)/i.test(t)) {
-    const num = Number(match[1]);
-    if (num > 0 && num <= 5000) return num;
-  }
-
-  if (session?.crop && !session?.waterLiters) {
-    match = t.match(/(\d+(?:\.\d+)?)/);
-    if (match) {
-      const num = Number(match[1]);
-      if (num > 0 && num <= 5000) return num;
+  for (const item of cropMap) {
+    for (const key of item.keys) {
+      if (t.includes(normalizeText(key))) return item.value;
     }
   }
 
+  if (raw.length >= 2 && raw.length <= 30 && !extractWaterLiters(raw)) {
+    return raw;
+  }
+
   return null;
 }
 
-function getCropLabel(crop) {
-  const map = {
-    tomato: "टमाटर",
-    mirch: "मिर्च",
-    tarbuj: "तरबूज",
-    papita: "पपीता",
-    karela: "करेला",
-    belvargiya: "बेलवर्गीय"
-  };
-  return map[crop] || "फसल";
+function getCropVideos(crop) {
+  if (!crop) return [];
+  const t = normalizeText(crop);
+  for (const item of CROP_VIDEO_MAP) {
+    if (item.keys.some(k => t.includes(normalizeText(k)))) return item.videos;
+  }
+  return [];
 }
 
-function getPackByWater(waterLiters) {
+function getBestPack(waterLiters) {
+  if (!waterLiters) return null;
+
   for (const pack of PACKS) {
-    if (waterLiters >= pack.min && waterLiters <= pack.max) {
-      return pack.text;
-    }
+    if (waterLiters >= pack.min && waterLiters <= pack.max) return pack.text;
   }
 
-  if (waterLiters > 60 && waterLiters < 100) {
-    return "👉 100 ml + 100 g + 50 g pack\n₹620\n\nया\n\n👉 200 ml + 200 g + 100 g pack\n₹1040";
+  for (const pack of PACKS) {
+    if (waterLiters <= pack.max) return pack.text;
   }
 
-  if (waterLiters > 120 && waterLiters < 150) {
-    return "👉 200 ml + 200 g + 100 g pack\n₹1040\n\nया\n\n👉 300 ml + 300 g + 150 g pack\n₹1360";
-  }
-
-  if (waterLiters > 170 && waterLiters < 200) {
-    return "👉 300 ml + 300 g + 150 g pack\n₹1360\n\nया\n\n👉 400 ml + 400 g + 200 g pack\n₹1620";
-  }
-
-  if (waterLiters > 220 && waterLiters < 300) {
-    return "👉 400 ml + 400 g + 200 g pack\n₹1620\n\nया\n\n👉 500 ml + 500 g + 300 g pack\n₹2260\n+ 100 ml Shooter + 100 g Viron FREE";
-  }
-
-  if (waterLiters > 340 && waterLiters < 600) {
-    return "👉 500 ml + 500 g + 300 g pack\n₹2260\n+ 100 ml Shooter + 100 g Viron FREE";
-  }
-
-  if (waterLiters > 650) {
-    return "👉 आपके पानी के हिसाब से बड़ा पैक लगेगा\nकृपया exact पानी बताइए, हम सही pack समझा देंगे 👍";
-  }
-
-  return "👉 कृपया पानी की मात्रा फिर से बताइए, हम सही pack समझा देंगे 👍";
+  const last = PACKS[PACKS.length - 1];
+  const multiplier = Math.ceil(waterLiters / last.max);
+  return `${last.text}\n👉 ${waterLiters} लीटर पानी के लिए लगभग ${multiplier} सेट लगेंगे।`;
 }
 
-function buildIntroMessage() {
+/* =========================
+   MESSAGES
+========================= */
+function welcomeMsg(lang = "hi") {
+  if (lang === "mr") {
+    return `🙏 नमस्कार शेतकरी बांधवा
+Primia Crop Care मध्ये तुमचं स्वागत आहे 👌
+पिकात व्हायरस किंवा वाढीची अडचण असेल तर आम्ही मदतीसाठी आहोत 👍
+
+👉 तुमचं पीक कोणतं आहे?
+👉 फवारणीत किती लिटर पाणी वापरता?`;
+  }
+
   return `🙏 नमस्ते किसान भाई
 Primia Crop Care में आपका स्वागत है 👌
 अगर फसल में वायरस या ग्रोथ की दिक्कत है, तो हम मदद के लिए यहाँ हैं 👍
@@ -234,265 +215,363 @@ Primia Crop Care में आपका स्वागत है 👌
 👉 स्प्रे में कितने लीटर पानी इस्तेमाल करते हैं?`;
 }
 
-function buildAskWaterOnlyMessage() {
-  return `👉 स्प्रे में कितने लीटर पानी इस्तेमाल करते हैं?`;
+function askWaterOnlyMsg(lang = "hi", crop = "") {
+  if (lang === "mr") {
+    return `👌 ठीक आहे
+👉 पीक: ${crop}
+👉 फवारणीत किती लिटर पाणी वापरता?`;
+  }
+
+  return `👌 ठीक है
+👉 फसल: ${crop}
+👉 स्प्रे में कितने लीटर पानी इस्तेमाल करते हैं?`;
 }
 
-function buildAskCropOnlyMessage() {
+function askCropOnlyMsg(lang = "hi") {
+  if (lang === "mr") return `👉 तुमचं पीक कोणतं आहे?`;
   return `👉 आपकी फसल कौन सी है?`;
 }
 
-function buildSalesMessage(crop, waterLiters) {
-  const cropLabel = getCropLabel(crop);
-  const videos = CROP_VIDEOS[crop] || [];
-  const packText = getPackByWater(waterLiters);
+function recommendationMsg(lang, crop, waterLiters) {
+  const pack = getBestPack(waterLiters);
+  const videos = getCropVideos(crop);
 
-  let videoSection = "";
-  if (videos.length > 0) {
-    videoSection = "\n\n🎥 रिजल्ट वीडियो:\n" + videos.join("\n");
+  let msg = "";
+
+  if (lang === "mr") {
+    msg = `👌 ${crop} साठी आमचा पूर्ण कॉम्बो असा आहे:
+
+Shooter 101 → व्हायरस पसरवणारे कीटक कंट्रोल करतो
+Viron → व्हायरस थांबवण्यासाठी आणि रिकव्हरीसाठी मदत करतो
+Kayakalp → नवीन आणि मजबूत वाढ देतो
+
+👉 डोस प्रति 1 लिटर:
+Shooter 101 → 2 ml
+Viron → 2 g
+Kayakalp → 1 g
+
+👉 तिन्ही औषधे एकत्र मिसळून फवारणी करा
+
+औषध पडल्यानंतर व्हायरसचा प्रसार थांबतो
+3–4 दिवसांत परिणाम दिसू लागतो
+5–7 दिवसांत फरक स्पष्ट दिसतो
+जास्त व्हायरसमध्ये पहिल्या फवारणीत सुमारे 30% सुधार दिसू शकतो
+व्हायरस नसलेल्या पिकात पीक सुरक्षित राहते`;
+  } else {
+    msg = `👌 ${crop} के लिए हमारा पूरा कॉम्बो यह है:
+
+Shooter 101 → वायरस फैलाने वाले कीट कंट्रोल करता है
+Viron → वायरस रोकने और रिकवरी में मदद करता है
+Kayakalp → नई और मजबूत ग्रोथ देता है
+
+👉 डोज प्रति 1 लीटर:
+Shooter 101 → 2 ml
+Viron → 2 g
+Kayakalp → 1 g
+
+👉 तीनों दवाएँ एक साथ मिलाकर स्प्रे करें
+
+दवा पड़ते ही वायरस फैलना रुकता है
+3–4 दिन में असर दिखता है
+5–7 दिन में फर्क साफ दिखता है
+ज्यादा वायरस में पहले स्प्रे में लगभग 30% सुधार संभव
+बिना वायरस में फसल सुरक्षित रहती है`;
   }
 
-  return `🙏 ${cropLabel} फसल के लिए हम ये 3 दवाएँ साथ में देते हैं:
-
-✔ Shooter 101 → वायरस फैलाने वाले कीट कंट्रोल करता है
-✔ Viron → वायरस रोकने और रिकवरी में मदद करता है
-✔ Kayakalp → नई और मजबूत ग्रोथ देता है
-
-👉 दवा पड़ते ही वायरस फैलना रुकता है
-👉 3–4 दिन में असर दिखता है
-👉 5–7 दिन में फर्क साफ दिखता है
-👉 ज्यादा वायरस में पहले स्प्रे में लगभग 30% सुधार संभव
-👉 बिना वायरस में फसल सुरक्षित रहती है
-
-प्रति 1 लीटर पानी:
-👉 Shooter 101 → 2 ml
-👉 Viron → 2 g
-👉 Kayakalp → 1 g
-
-👉 तीनों दवाएँ एक साथ मिलाकर स्प्रे करें${videoSection}
-
-${packText}
-
-👉 क्या हम आपका ऑर्डर बुक कर दें? 👌`;
-}
-
-function shouldIgnoreBecauseDeleteIntent(text = "") {
-  const t = normalize(text);
-  return (
-    t.includes("delete") ||
-    t.includes("kyon delete") ||
-    t.includes("message hata") ||
-    t.includes("dubara bhejo")
-  );
-}
-
-async function askSarvam(userText) {
-  const payload = {
-    model: "sarvam-m",
-    messages: [
-      {
-        role: "system",
-        content:
-          "आप किसान से हिंदी में छोटे WhatsApp-style reply में बात करें। अंग्रेज़ी में reply न दें। कोई बाहरी product suggest न करें। अगर जवाब छोटा हो सकता है तो छोटा रखें।"
-      },
-      {
-        role: "user",
-        content: userText
-      }
-    ]
-  };
-
-  const sarvamRes = await fetch("https://api.sarvam.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${SARVAM_API_KEY}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const sarvamData = await sarvamRes.json();
-  console.log("Sarvam Response:", JSON.stringify(sarvamData, null, 2));
-
-  let reply =
-    sarvamData?.choices?.[0]?.message?.content ||
-    "अभी जवाब उपलब्ध नहीं है।";
-
-  reply = stripThinkBlocks(reply);
-
-  if (!reply) {
-    reply = "अभी जवाब उपलब्ध नहीं है।";
+  if (videos.length) {
+    msg += lang === "mr" ? `\n\n👉 तुमच्या पिकाचे व्हिडिओ:` : `\n\n👉 आपकी फसल के वीडियो:`;
+    videos.forEach(v => {
+      msg += `\n${v}`;
+    });
   }
 
-  return reply;
+  if (pack) {
+    msg += lang === "mr"
+      ? `\n\n👉 ${waterLiters} लिटर पाण्यासाठी योग्य पॅक:\n${pack}`
+      : `\n\n👉 ${waterLiters} लीटर पानी के लिए सही पैक:\n${pack}`;
+  }
+
+  msg += `\n\nक्या हम आपका ऑर्डर बुक कर दें? 👌
+Online payment → 10% छूट 👍
+COD → कीमत वही रहेगी`;
+
+  return msg;
 }
 
-async function sendWhatsAppMessage(phoneNumberId, to, body) {
-  const response = await fetch(
-    `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`,
+function paymentReply(lang, mode) {
+  if (lang === "mr") {
+    if (mode === "online") {
+      return `👌 ऑनलाइन पेमेंटवर 10% सूट मिळेल 👍
+
+👉 तुमचं नाव आणि पूर्ण पत्ता पाठवा.`;
+    }
+    return `👌 COD वर किंमत तीच राहील
+
+👉 तुमचं नाव आणि पूर्ण पत्ता पाठवा.`;
+  }
+
+  if (mode === "online") {
+    return `👌 Online payment पर 10% छूट मिलेगी 👍
+
+👉 अपना नाम और पूरा पता भेज दीजिए।`;
+  }
+
+  return `👌 COD पर कीमत वही रहेगी
+
+👉 अपना नाम और पूरा पता भेज दीजिए।`;
+}
+
+function genericNoOutsideAdvice(lang) {
+  if (lang === "mr") {
+    return `🙏 या समस्येसाठी आमची उत्पादने लागू नसतील तर आम्ही फक्त आमच्या उत्पादनांपुरतीच माहिती देऊ शकतो.`;
+  }
+  return `🙏 अगर इस समस्या के लिए हमारे प्रोडक्ट लागू नहीं हैं, तो हम सिर्फ अपने प्रोडक्ट से जुड़ी जानकारी ही दे सकते हैं।`;
+}
+
+/* =========================
+   SEND MESSAGE
+========================= */
+async function sendWhatsAppText(to, body) {
+  const cleaned = stripThinkTags(body);
+  if (!cleaned) return;
+
+  await axios.post(
+    `https://graph.facebook.com/v23.0/${PHONE_NUMBER_ID}/messages`,
     {
-      method: "POST",
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: cleaned }
+    },
+    {
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to,
-        text: { body }
-      })
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json"
+      }
     }
   );
-
-  const data = await response.json();
-  console.log("WhatsApp send response:", JSON.stringify(data, null, 2));
-  return data;
 }
 
+/* =========================
+   AGENT SILENCE
+========================= */
+function markAgentSilence(phone, minutes = 15) {
+  const session = getSession(phone);
+  session.agentSilentUntil = Date.now() + minutes * 60 * 1000;
+}
+
+function isSilentDueToAgent(phone) {
+  const session = getSession(phone);
+  return Date.now() < session.agentSilentUntil;
+}
+
+/* =========================
+   HANDLE MESSAGE
+========================= */
+async function handleIncomingText(from, text) {
+  const session = getSession(from);
+  session.lastUserMessageAt = Date.now();
+  session.stopFollowup = true;
+
+  const cleanText = stripThinkTags(text || "").trim();
+  if (!cleanText) return;
+
+  session.language = detectLanguage(cleanText);
+
+  if (containsAny(cleanText, HUMAN_AGENT_TRIGGERS)) {
+    markAgentSilence(from, 15);
+    return sendWhatsAppText(
+      from,
+      session.language === "mr"
+        ? "👌 आमच्या टीमकडून संपर्क होईपर्यंत आम्ही शांत राहू."
+        : "👌 हमारी टीम के जवाब तक हम शांत रहेंगे।"
+    );
+  }
+
+  if (isSilentDueToAgent(from)) return;
+
+  if (containsAny(cleanText, DELETE_WORD_TRIGGERS)) {
+    if (!session.crop || !session.waterLiters) {
+      return sendWhatsAppText(from, session.crop ? askWaterOnlyMsg(session.language, session.crop) : askCropOnlyMsg(session.language));
+    }
+    return sendWhatsAppText(from, recommendationMsg(session.language, session.crop, session.waterLiters));
+  }
+
+  if (!session.introSent && isLikelyGreeting(cleanText)) {
+    session.introSent = true;
+    return sendWhatsAppText(from, welcomeMsg(session.language));
+  }
+
+  const foundCrop = detectCrop(cleanText);
+  const foundWater = extractWaterLiters(cleanText);
+
+  if (!session.crop && foundCrop) session.crop = foundCrop;
+  if (!session.waterLiters && foundWater) session.waterLiters = foundWater;
+  if (!session.introSent) session.introSent = true;
+
+  if (!session.crop && !session.waterLiters) {
+    return sendWhatsAppText(from, welcomeMsg(session.language));
+  }
+
+  if (session.crop && !session.waterLiters) {
+    return sendWhatsAppText(from, askWaterOnlyMsg(session.language, session.crop));
+  }
+
+  if (!session.crop && session.waterLiters) {
+    return sendWhatsAppText(from, askCropOnlyMsg(session.language));
+  }
+
+  if (session.crop && session.waterLiters && !session.recommendationSent) {
+    session.recommendationSent = true;
+    session.orderAsked = true;
+    return sendWhatsAppText(from, recommendationMsg(session.language, session.crop, session.waterLiters));
+  }
+
+  if (session.orderAsked && containsAny(cleanText, ORDER_YES_WORDS)) {
+    return sendWhatsAppText(
+      from,
+      session.language === "mr"
+        ? `👌 ठीक आहे
+
+Online payment → 10% सूट 👍
+COD → किंमत तीच राहील
+
+👉 ऑनलाइन की COD?`
+        : `👌 ठीक है
+
+Online payment → 10% छूट 👍
+COD → कीमत वही रहेगी
+
+👉 Online या COD?`
+    );
+  }
+
+  if (containsAny(cleanText, PAYMENT_ONLINE_WORDS)) {
+    return sendWhatsAppText(from, paymentReply(session.language, "online"));
+  }
+
+  if (containsAny(cleanText, PAYMENT_COD_WORDS)) {
+    return sendWhatsAppText(from, paymentReply(session.language, "cod"));
+  }
+
+  if (session.crop && session.waterLiters && session.recommendationSent) {
+    return sendWhatsAppText(
+      from,
+      session.language === "mr"
+        ? `👌 तुमची माहिती आमच्याकडे आहे
+
+पीक: ${session.crop}
+पाणी: ${session.waterLiters} लिटर
+
+${getBestPack(session.waterLiters)}
+
+क्या हम आपका ऑर्डर बुक कर दें? 👌`
+        : `👌 आपकी जानकारी हमारे पास है
+
+फसल: ${session.crop}
+पानी: ${session.waterLiters} लीटर
+
+${getBestPack(session.waterLiters)}
+
+क्या हम आपका ऑर्डर बुक कर दें? 👌`
+    );
+  }
+
+  return sendWhatsAppText(from, genericNoOutsideAdvice(session.language));
+}
+
+/* =========================
+   WEBHOOK VERIFY
+========================= */
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verified");
+    console.log("Webhook verified");
     return res.status(200).send(challenge);
-  } else {
-    console.log("❌ Verification failed");
-    return res.sendStatus(403);
   }
+
+  return res.sendStatus(403);
 });
 
+/* =========================
+   WEBHOOK RECEIVE
+========================= */
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("Incoming JSON:", JSON.stringify(req.body, null, 2));
+    const body = req.body;
 
-    const value = req.body?.entry?.[0]?.changes?.[0]?.value;
-    const message = value?.messages?.[0];
-    const phoneNumberId = value?.metadata?.phone_number_id;
-
-    if (!message || !phoneNumberId) {
-      return res.sendStatus(200);
+    if (body.object !== "whatsapp_business_account") {
+      return res.sendStatus(404);
     }
 
-    if (message.type !== "text") {
-      return res.sendStatus(200);
-    }
+    const entry = body.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
 
-    const from = message.from;
-    const text = message?.text?.body?.trim();
+    if (!value) return res.sendStatus(200);
 
-    if (!from || !text) {
-      return res.sendStatus(200);
-    }
+    const messages = value.messages || [];
 
-    const session = resetSessionIfNeeded(getSession(from));
-    session.lastUserAt = Date.now();
-    session.language = detectLanguage(text);
+    if (messages.length > 0) {
+      const msg = messages[0];
+      const from = msg.from;
+      const type = msg.type;
 
-    if (shouldIgnoreBecauseDeleteIntent(text)) {
-      return res.sendStatus(200);
-    }
+      let text = "";
 
-    const crop = detectCrop(text);
-    const water = extractWaterLiters(text, session);
-
-    if (!session.crop && crop) {
-      session.crop = crop;
-    }
-
-    if (!session.waterLiters && water) {
-      session.waterLiters = water;
-    }
-
-    let reply = null;
-
-    if (!session.askedIntro) {
-      session.askedIntro = true;
-
-      if (session.crop && session.waterLiters) {
-        reply = buildSalesMessage(session.crop, session.waterLiters);
+      if (type === "text") {
+        text = msg.text?.body || "";
+      } else if (type === "button") {
+        text = msg.button?.text || "";
+      } else if (type === "interactive") {
+        text =
+          msg.interactive?.button_reply?.title ||
+          msg.interactive?.list_reply?.title ||
+          "";
       } else {
-        reply = buildIntroMessage();
+        const session = getSession(from);
+        await sendWhatsAppText(
+          from,
+          session.crop ? askWaterOnlyMsg(session.language, session.crop) : welcomeMsg(session.language)
+        );
+        return res.sendStatus(200);
       }
-    } else if (!session.crop && !session.waterLiters) {
-      reply = buildIntroMessage();
-    } else if (session.crop && !session.waterLiters) {
-      if (water) {
-        session.waterLiters = water;
-        reply = buildSalesMessage(session.crop, session.waterLiters);
-      } else {
-        reply = buildAskWaterOnlyMessage();
-      }
-    } else if (!session.crop && session.waterLiters) {
-      if (crop) {
-        session.crop = crop;
-        reply = buildSalesMessage(session.crop, session.waterLiters);
-      } else {
-        reply = buildAskCropOnlyMessage();
-      }
-    } else if (session.crop && session.waterLiters) {
-      const t = normalize(text);
 
-      const isFreshGreeting =
-        /^(hi|hii|hiii|hello|hy|hey|namaste|नमस्ते)$/.test(t);
-
-      if (isFreshGreeting) {
-        reply = `👉 आपकी फसल कौन सी है?
-👉 स्प्रे में कितने लीटर पानी इस्तेमाल करते हैं?`;
-        session.crop = null;
-        session.waterLiters = null;
-      } else {
-        const salesKeywords = [
-          "क्या काम करता है",
-          "price",
-          "प्राइस",
-          "दाम",
-          "कितना",
-          "ऑर्डर",
-          "order",
-          "बुक",
-          "virus",
-          "वायरस",
-          "काम करता",
-          "pack",
-          "पैक"
-        ];
-
-        const hasSalesKeyword = salesKeywords.some((k) => t.includes(k));
-
-        if (crop && crop !== session.crop) {
-          session.crop = crop;
-          if (water) session.waterLiters = water;
-          reply = buildSalesMessage(session.crop, session.waterLiters);
-        } else if (water) {
-          session.waterLiters = water;
-          reply = buildSalesMessage(session.crop, session.waterLiters);
-        } else if (hasSalesKeyword) {
-          reply = buildSalesMessage(session.crop, session.waterLiters);
-        } else {
-          reply = await askSarvam(text);
-        }
-      }
+      console.log("Incoming from", from, ":", text);
+      await handleIncomingText(from, text);
     }
-
-    if (!reply) {
-      reply = "अभी जवाब उपलब्ध नहीं है।";
-    }
-
-    reply = stripThinkBlocks(reply);
-
-    await sendWhatsAppMessage(phoneNumberId, from, reply);
-    session.lastBotReplyAt = Date.now();
 
     return res.sendStatus(200);
   } catch (err) {
-    console.error("Webhook error:", err);
+    console.error("Webhook error:", err.response?.data || err.message || err);
     return res.sendStatus(200);
   }
 });
 
-const PORT = process.env.PORT || 3000;
+/* =========================
+   OPTIONAL AGENT SILENCE
+========================= */
+app.post("/agent-replied", (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) {
+      return res.status(400).json({ ok: false, error: "phone required" });
+    }
+
+    markAgentSilence(phone, 15);
+    return res.json({ ok: true, message: "AI silent for 15 minutes" });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/", (req, res) => {
+  res.send("Primia WhatsApp bot is running 👍");
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
