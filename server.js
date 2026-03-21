@@ -1,5 +1,4 @@
 const express = require("express");
-const express = require("express");
 const axios = require("axios");
 
 const app = express();
@@ -45,8 +44,8 @@ async function getAIReply(text) {
 
     return res.data.choices?.[0]?.message?.content || "ठीक है";
   } catch (e) {
-    console.log("Sarvam error:", e.message);
-    return "अभी AI में problem है, थोड़ी देर बाद try करो";
+    console.log("Sarvam error:", e.response?.data || e.message);
+    return "AI में error आ रही है, बाद में try करो";
   }
 }
 
@@ -71,7 +70,7 @@ async function sendWhatsAppText(to, message) {
       }
     );
   } catch (e) {
-    console.log("WhatsApp send error:", e.message);
+    console.log("WhatsApp send error:", e.response?.data || e.message);
   }
 }
 
@@ -84,11 +83,12 @@ app.get("/webhook", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode && token === VERIFY_TOKEN) {
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("Webhook verified");
     return res.status(200).send(challenge);
-  } else {
-    return res.sendStatus(403);
   }
+
+  return res.sendStatus(403);
 });
 
 /* =========================
@@ -101,13 +101,13 @@ app.post("/webhook", async (req, res) => {
     const changes = entry?.changes?.[0];
     const messages = changes?.value?.messages;
 
-    if (messages && messages[0]) {
-      const from = messages[0].from;
-      const text = messages[0].text?.body || "";
+    if (messages && messages.length > 0) {
+      const msg = messages[0];
+      const from = msg.from;
+      const text = msg.text?.body || "";
 
       console.log("User:", text);
 
-      // 👉 DIRECT AI REPLY (NO LOGIC)
       const aiReply = await getAIReply(text);
 
       console.log("AI:", aiReply);
@@ -117,7 +117,7 @@ app.post("/webhook", async (req, res) => {
 
     res.sendStatus(200);
   } catch (e) {
-    console.log("Webhook error:", e.message);
+    console.log("Webhook error:", e.response?.data || e.message);
     res.sendStatus(200);
   }
 });
