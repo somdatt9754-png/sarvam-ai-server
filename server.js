@@ -164,9 +164,7 @@ function detectCrop(text) {
     }
   }
 
-  if (raw.length >= 2 && raw.length <= 30 && !extractWaterLiters(raw)) {
-    return raw;
-  }
+  
 
   return null;
 }
