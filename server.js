@@ -144,8 +144,7 @@ function detectCrop(text) {
   const raw = text.toString().trim().toLowerCase();
 
   if (raw.includes("मिर्च") || raw.includes("chilli")) return "मिर्च";
-  if (raw.includes("टमाटर") || raw.includes("tomato")) return "टमाटर";
-
+if (raw.includes("टमाटर") || raw.includes("tomato")) return "टमाटर";
   return null;
 }
 
