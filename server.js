@@ -405,7 +405,7 @@ async function handleIncomingText(from, text) {
   const foundCrop = detectCrop(cleanText);
   const foundWater = extractWaterLiters(cleanText);
 
-  if (!session.crop && foundCrop) session.crop = foundCrop;
+  if (foundCrop) session.crop = foundCrop;
   if (!session.waterLiters && foundWater) session.waterLiters = foundWater;
   if (!session.introSent) session.introSent = true;
 
