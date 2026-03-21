@@ -141,30 +141,10 @@ function extractWaterLiters(text) {
 }
 
 function detectCrop(text) {
-  const raw = text.toString().trim();
-  const t = normalizeText(raw);
+  const raw = text.toString().trim().toLowerCase();
 
-  const cropMap = [
-    { keys: ["टमाटर", "tomato"], value: "टमाटर" },
-    { keys: ["मिर्च", "हरी मिर्च", "लाल मिर्च", "chilli", "chili"], value: "मिर्च" },
-    { keys: ["शिमला मिर्च", "capsicum"], value: "शिमला मिर्च" },
-    { keys: ["पपीता", "papaya"], value: "पपीता" },
-    { keys: ["तरबूज", "watermelon"], value: "तरबूज" },
-    { keys: ["करेला", "bitter gourd"], value: "करेला" },
-    { keys: ["खीरा", "cucumber"], value: "खीरा" },
-    { keys: ["ककड़ी"], value: "ककड़ी" },
-    { keys: ["लौकी", "bottle gourd"], value: "लौकी" },
-    { keys: ["तोरई", "ridge gourd"], value: "तोरई" },
-    { keys: ["नेनुआ", "sponge gourd"], value: "नेनुआ" }
-  ];
-
-  for (const item of cropMap) {
-    for (const key of item.keys) {
-      if (t.includes(normalizeText(key))) return item.value;
-    }
-  }
-
-  
+  if (raw.includes("मिर्च") || raw.includes("chilli")) return "मिर्च";
+  if (raw.includes("टमाटर") || raw.includes("tomato")) return "टमाटर";
 
   return null;
 }
